@@ -70,7 +70,7 @@ def main2(monkeys: list, rounds=10000):
     """
     What is the level of monkey business after 20 rounds of stuff-slinging simian shenanigans?
     """
-    base = 1
+    base = 1  # lcm = product, because all div_test are primes
     for m in monkeys:
         base *= m.div_test
 
