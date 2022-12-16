@@ -38,13 +38,14 @@ def to_matrix(maze: dict, flow_rates: dict, start: str) -> (np.ndarray, np.ndarr
 
 def main1(maze: dict, flow_rates: dict, start='AA', time_total=30):
     maze, flow_rates, start = to_matrix(maze, flow_rates, start)
+    non_zero_nodes = {i for i, v in enumerate(flow_rates) if v != 0}
 
     def get_neighbours(valve, path, time_left):
         res = []
-        nodes = set(range(maze.shape[0])) - set(path)
+        nodes = non_zero_nodes - set(path)
         for i in nodes:
             d = maze[valve, i]
-            if d <= time_left and flow_rates[i] > 0:
+            if d <= time_left:
                 res.append((i, d))
         return res
 
@@ -73,23 +74,23 @@ def test_part1(sample):
 
 def main2(maze: dict, flow_rates: dict, start='AA', time_total=26):
     maze, flow_rates, start = to_matrix(maze, flow_rates, start)
+    non_zero_nodes = {i for i, v in enumerate(flow_rates) if v != 0}
 
     def get_neighbours(valve, path, time_left):
         res = []
-        nodes = set(range(maze.shape[0])) - set(path)
+        nodes = non_zero_nodes - set(path)
         for i in nodes:
             d = maze[valve, i]
-            if d <= time_left and flow_rates[i] > 0:
+            if d <= time_left:
                 res.append((i, d))
         return res
 
     max_obj = 0
     path, obj = [], []
     neighbours = get_neighbours(start, path, time_total)
-    stack = [  # optimisation self and elephant equal at start, replace product with combinations
+    stack = [  # optimisation: self and elephant equal at start, so replace product with combinations
         (0, n_self, n_elephant, time_total - d_self, time_total - d_elephant)
         for (n_self, d_self), (n_elephant, d_elephant) in combinations(neighbours, 2)
-        if n_self != n_elephant
     ]
 
     while stack:
