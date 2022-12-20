@@ -13,7 +13,7 @@ def read(filename: str) -> list:
 
 
 def move(a: list, item: (int, int)):
-    if item == 0:
+    if item[1] == 0:
         return
     n = len(a) - 1
     ind = a.index(item)
