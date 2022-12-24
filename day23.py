@@ -78,7 +78,7 @@ def main1(elves: np.ndarray, rounds=10):
         (np.array([-1, -1, -1]), np.array([-1, 0, 1])),  # north
         (np.array([1, 1, 1]), np.array([-1, 0, 1])),     # south
         (np.array([-1, 0, 1]), np.array([-1, -1, -1])),  # west
-        (np.array([-1, 0, 1]), np.array([1, 1, 1])),
+        (np.array([-1, 0, 1]), np.array([1, 1, 1])),     # east
     ]
     elves = expand(elves, add=rounds)  # add free space to move
     for _ in range(rounds):
@@ -100,7 +100,7 @@ def main2(elves: np.ndarray):
         (np.array([-1, -1, -1]), np.array([-1, 0, 1])),  # north
         (np.array([1, 1, 1]), np.array([-1, 0, 1])),     # south
         (np.array([-1, 0, 1]), np.array([-1, -1, -1])),  # west
-        (np.array([-1, 0, 1]), np.array([1, 1, 1])),
+        (np.array([-1, 0, 1]), np.array([1, 1, 1])),     # east
     ]
     for round in count(1):
         elves = expand(elves, add=10)  # add free space to move
