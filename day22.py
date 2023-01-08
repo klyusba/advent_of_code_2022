@@ -1,11 +1,15 @@
 from pytest import fixture
 import numpy as np
 import re
+from scipy.spatial.transform import Rotation
 
 
 @fixture
 def sample():
     return read('sample.txt')
+
+
+WALL = 2
 
 
 def read(filename: str) -> (np.ndarray, list):
@@ -15,7 +19,7 @@ def read(filename: str) -> (np.ndarray, list):
     map = map.splitlines()
     max_x = max(len(line) for line in map)
     M = np.zeros((len(map), max_x), dtype=int)
-    v = {' ': 0, '.': 1, '#': 2}
+    v = {' ': 0, '.': 1, '#': WALL}
     for i, line in enumerate(map):
         for j, c in enumerate(line):
             M[i, j] = v[c]
@@ -47,7 +51,7 @@ def find_stop_point(field: np.ndarray, start: int, step: int) -> int:
     pos = start
     for i in range(1, step+1):
         pos = (start + i) % n
-        if field[pos] == 2:
+        if field[pos] == WALL:
             return (pos - 1) % n
     return pos
 
@@ -112,13 +116,224 @@ def test_part1(sample):
     assert main1(*sample) == 6032
 
 
+# part2 main ideas:
+# -fold cube
+# -trac global position in 3D
+# -find relative position and facing from the perspective of the map
+
+
+class Face:
+    def __init__(self, data, x, y):
+        self.data = data
+        self.x = x
+        self.y = y
+        self.empty = np.sum(data) == 0
+        self.neighbours = {}  # <^>v: Face
+        self.basis = np.eye(4)
+        self.basis_inv = None
+
+    def __getitem__(self, item):
+        return self.data[item]
+
+    def project(self, v):
+        x = np.zeros(4)
+        x[:-1] = v
+        x[-1] = 1
+        if self.basis_inv is None:
+            self.basis_inv = np.linalg.inv(self.basis)
+        res = self.basis_inv @ x
+        res = np.round(res).astype(int)
+        return res[0], res[1]
+
+    def local_direction(self, v):
+        """facing direction >v<^ """
+        v = self.project(v)
+        f = v[0] + 1 + (v[1] + 1) * 3
+        return {5: 'v', 3: '^', 7: '>', 1: '<'}[f]
+
+
+def _cut(M: np.ndarray):
+    S = (M > 0).sum()  # total area
+    a = int((S / 6) ** 0.5)
+
+    n, m = M.shape
+    n, m = n // a, m // a
+    segments = []
+    for i in range(n):
+        row = [
+            Face(M[i * a: (i + 1) * a, j * a: (j + 1) * a], x=i * a, y=j * a)
+            for j in range(m)
+        ]
+        segments.append(row)
+
+    faces = []
+    for i, row in enumerate(segments):
+        for j, face in enumerate(row):
+            if not face.empty:
+                face.neighbours = _find_neighbours(segments, i, j)
+                faces.append(face)
+
+    return faces, a
+
+
+def _find_neighbours(segments, i, j):
+    # direct neighbours
+    res = {}
+    # up
+    try:
+        face = segments[(i - 1) % 4][j]
+        if not face.empty:
+            res['^'] = face
+    except IndexError:
+        pass
+    # down
+    try:
+        face = segments[(i + 1) % 4][j]
+        if not face.empty:
+            res['v'] = face
+    except IndexError:
+        pass
+    # left
+    try:
+        face = segments[i][(j - 1) % 4]
+        if not face.empty:
+            res['<'] = face
+    except IndexError:
+        pass
+    # right
+    try:
+        face = segments[i][(j + 1) % 4]
+        if not face.empty:
+            res['>'] = face
+    except IndexError:
+        pass
+    return res
+
+#  view from top:
+#  z y
+#  ⊙->---
+# x↓    |
+#  |    |
+#  ------
+
+
+rotations = {
+    '>': Rotation.from_euler('x', -90, degrees=True),
+    '<': Rotation.from_euler('x', 90, degrees=True),
+    '^': Rotation.from_euler('y', -90, degrees=True),
+    'v': Rotation.from_euler('y', 90, degrees=True),
+    'L': Rotation.from_euler('z', 90, degrees=True),
+    'R': Rotation.from_euler('z', -90, degrees=True),
+}
+
+
+def _cover(faces, transforms) -> dict:
+    res = {}
+    visited = set()
+    basis = np.eye(4)
+    basis[-1, :] = 1
+    stack = [(faces[0], np.eye(4)), ]
+    while stack:
+        f, T = stack.pop()
+        new_basis = T @ basis
+        face_num = Cube.encode(new_basis[:, 2] - new_basis[:, 3])
+        if face_num not in visited:
+            visited.add(face_num)
+            f.basis = new_basis
+            res[face_num] = f
+
+            for d, n in f.neighbours.items():
+                stack.append(
+                    (n, T @ transforms[d])
+                )
+    return res
+
+
+class Actor:
+    def __init__(self, segment, x, y, vx, vy):
+        self.segment = segment
+        self.position = np.array([x, y, 0], dtype=int)
+        self._start_velocity = np.array([vx, vy, 0], dtype=int)
+        self._rotation = Rotation.identity()
+
+    @property
+    def velocity(self):
+        v = self._rotation.apply(self._start_velocity)
+        return np.round(v).astype(int)
+
+    def turn(self, side: str):
+        r = rotations[side]
+        self._rotation = r * self._rotation
+
+
+class Cube:
+    def __init__(self, M: np.ndarray):
+        faces, size = _cut(M)
+        # init transforms from rotations
+        transforms = {}
+        for k, r in rotations.items():
+            t = np.zeros((4, 4), dtype=int)
+            t[:3, :3] = np.round(r.as_matrix()).astype(int)
+            t[3, 3] = 1
+            transforms[k] = t
+        # shifts
+        transforms['>'][1, 3] = size
+        transforms['<'][2, 3] = -size
+        transforms['^'][2, 3] = -size
+        transforms['v'][0, 3] = size
+
+        self.faces = _cover(faces, transforms)
+        self.size = size
+
+    @staticmethod
+    def encode(b: np.ndarray) -> int:
+        v = b + 1
+        return int(v[0] + 3 * v[1] + 9 * v[2] + 1e-7)  # 0.1 for rounding
+
+    def step(self, actor: Actor):
+        face = self.faces[actor.segment]
+        p, v = actor.position, actor.velocity
+        p_new = p + v
+        x_new, y_new = face.project(p_new)
+
+        # recalc position after go around the corner
+        if x_new >= self.size or x_new < 0 or y_new >= self.size or y_new < 0:
+            s_new = self.encode(actor.velocity)
+            face_new = self.faces[s_new]
+            x_new, y_new = face_new.project(p_new)
+            if face_new[x_new, y_new] == WALL:
+                return WALL
+
+            actor.position = p_new
+            actor.segment = s_new
+            actor.turn(face.local_direction(v))
+        elif face[x_new, y_new] == WALL:
+            return WALL
+        else:
+            actor.position = p_new
+
+    def get_pos(self, actor: Actor):
+        s, p, v = actor.segment, actor.position, actor.velocity
+        face = self.faces[s]
+        x, y = face.project(p)
+        f = face.local_direction(v)
+        return x + face.x, y + face.x, '>v<^'.index(f)
+
+
 def main2(M: np.ndarray, path: list):
     """
     Fold the map into a cube, then follow the path given in the monkeys' notes. What is the final password?
     """
-    x, y = np.where(M)
-    pos = [x[0], y[0], 0]  # row, col, >
-    return password(*pos)
+    cube = Cube(M)
+    me = Actor(22, 0, 0, 0, 1)
+    for step in path:
+        if isinstance(step, int):
+            for _ in range(step):
+                if cube.step(me) == WALL:
+                    break
+        else:
+            me.turn(step)
+    return password(*cube.get_pos(me))
 
 
 def test_part2(sample):
@@ -126,6 +341,6 @@ def test_part2(sample):
 
 
 if __name__ == "__main__":
-    data = read('input.txt')
-    print(main1(*data))
-    # print(main2(*data))
+    data = read('input22.txt')
+    # print(main1(*data))
+    print(main2(*data))
