@@ -222,8 +222,6 @@ rotations = {
     '<': Rotation.from_euler('x', 90, degrees=True),
     '^': Rotation.from_euler('y', -90, degrees=True),
     'v': Rotation.from_euler('y', 90, degrees=True),
-    'L': Rotation.from_euler('z', 90, degrees=True),
-    'R': Rotation.from_euler('z', -90, degrees=True),
 }
 
 
@@ -239,7 +237,7 @@ def _cover(faces, transforms) -> dict:
         face_num = Cube.encode(new_basis[:, 2] - new_basis[:, 3])
         if face_num not in visited:
             visited.add(face_num)
-            f.basis = new_basis
+            f.basis = new_basis.astype(int)
             res[face_num] = f
 
             for d, n in f.neighbours.items():
@@ -253,17 +251,7 @@ class Actor:
     def __init__(self, segment, x, y, vx, vy):
         self.segment = segment
         self.position = np.array([x, y, 0], dtype=int)
-        self._start_velocity = np.array([vx, vy, 0], dtype=int)
-        self._rotation = Rotation.identity()
-
-    @property
-    def velocity(self):
-        v = self._rotation.apply(self._start_velocity)
-        return np.round(v).astype(int)
-
-    def turn(self, side: str):
-        r = rotations[side]
-        self._rotation = r * self._rotation
+        self.velocity = np.array([vx, vy, 0], dtype=int)
 
 
 class Cube:
@@ -277,10 +265,10 @@ class Cube:
             t[3, 3] = 1
             transforms[k] = t
         # shifts
-        transforms['>'][1, 3] = size
-        transforms['<'][2, 3] = -size
-        transforms['^'][2, 3] = -size
-        transforms['v'][0, 3] = size
+        transforms['>'][1, 3] = (size-1)
+        transforms['<'][2, 3] = -(size-1)
+        transforms['^'][2, 3] = -(size-1)
+        transforms['v'][0, 3] = (size-1)
 
         self.faces = _cover(faces, transforms)
         self.size = size
@@ -298,26 +286,40 @@ class Cube:
 
         # recalc position after go around the corner
         if x_new >= self.size or x_new < 0 or y_new >= self.size or y_new < 0:
-            s_new = self.encode(actor.velocity)
+            s_new = self.encode(v)
             face_new = self.faces[s_new]
-            x_new, y_new = face_new.project(p_new)
+            x_new, y_new = face_new.project(p)
             if face_new[x_new, y_new] == WALL:
                 return WALL
 
-            actor.position = p_new
+            actor.position = p
             actor.segment = s_new
-            actor.turn(face.local_direction(v))
+            # turn around the corner
+            z = face.basis[:3, 2] - face.basis[:3, 3]
+            z_new = face_new.basis[:3, 2] - face_new.basis[:3, 3]
+            y = np.cross(z, z_new)
+            actor.velocity = np.cross(y, v)
         elif face[x_new, y_new] == WALL:
             return WALL
         else:
             actor.position = p_new
+
+    def turn(self, actor: Actor, side: str):
+        face = self.faces[actor.segment]
+        v = actor.velocity
+        z = face.basis[:3, 2] - face.basis[:3, 3]
+        v_new = np.cross(v, z)
+        if side == 'L':
+            actor.velocity = -v_new
+        else:
+            actor.velocity = v_new
 
     def get_pos(self, actor: Actor):
         s, p, v = actor.segment, actor.position, actor.velocity
         face = self.faces[s]
         x, y = face.project(p)
         f = face.local_direction(v)
-        return x + face.x, y + face.x, '>v<^'.index(f)
+        return x + face.x, y + face.y, '>v<^'.index(f)
 
 
 def main2(M: np.ndarray, path: list):
@@ -332,7 +334,7 @@ def main2(M: np.ndarray, path: list):
                 if cube.step(me) == WALL:
                     break
         else:
-            me.turn(step)
+            cube.turn(me, step)
     return password(*cube.get_pos(me))
 
 
